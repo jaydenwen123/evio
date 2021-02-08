@@ -113,7 +113,7 @@ func stdserve(events Events, listeners []*listener) error {
 	s.lns = listeners
 	s.cond = sync.NewCond(&sync.Mutex{})
 
-	//println("-- server starting")
+	// println("-- server starting")
 	if events.Serving != nil {
 		var svr Server
 		svr.NumLoops = numLoops
@@ -227,7 +227,7 @@ func stdloopRun(s *stdserver, l *stdloop) {
 	tick := make(chan bool)
 	tock := make(chan time.Duration)
 	defer func() {
-		//fmt.Println("-- loop stopped --", l.idx)
+		// fmt.Println("-- loop stopped --", l.idx)
 		if l.idx == 0 && s.events.Tick != nil {
 			close(tock)
 			go func() {
@@ -252,7 +252,7 @@ func stdloopRun(s *stdserver, l *stdloop) {
 			}
 		}()
 	}
-	//fmt.Println("-- loop started --", l.idx)
+	// fmt.Println("-- loop started --", l.idx)
 	for {
 		select {
 		case <-tick:

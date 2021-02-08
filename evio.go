@@ -149,6 +149,7 @@ func Serve(events Events, addr ...string) error {
 	for _, addr := range addr {
 		var ln listener
 		var stdlibt bool
+		// tcp://:localhost:2002?reuseport=true
 		ln.network, ln.addr, ln.opts, stdlibt = parseAddr(addr)
 		if stdlibt {
 			stdlib = true
@@ -157,6 +158,7 @@ func Serve(events Events, addr ...string) error {
 			os.RemoveAll(ln.addr)
 		}
 		var err error
+		// 区分udp和tcp/uds
 		if ln.network == "udp" {
 			if ln.opts.reusePort {
 				ln.pconn, err = reuseportListenPacket(ln.network, ln.addr)
@@ -165,6 +167,7 @@ func Serve(events Events, addr ...string) error {
 			}
 		} else {
 			if ln.opts.reusePort {
+				// 端口重用
 				ln.ln, err = reuseportListen(ln.network, ln.addr)
 			} else {
 				ln.ln, err = net.Listen(ln.network, ln.addr)

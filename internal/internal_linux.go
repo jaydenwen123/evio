@@ -120,7 +120,7 @@ func (p *Poll) ModReadWrite(fd int) {
 	}
 }
 
-// ModDetach ...
+// ModDetach ... delete
 func (p *Poll) ModDetach(fd int) {
 	if err := syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_DEL, fd,
 		&syscall.EpollEvent{Fd: int32(fd),

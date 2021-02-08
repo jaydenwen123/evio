@@ -56,7 +56,7 @@ type server struct {
 	accepted uintptr            // accept counter
 	tch      chan time.Duration // ticker channel
 
-	//ticktm   time.Time      // next tick time
+	// ticktm   time.Time      // next tick time
 }
 
 type loop struct {
@@ -99,7 +99,7 @@ func serve(events Events, listeners []*listener) error {
 	s.balance = events.LoadBalance
 	s.tch = make(chan time.Duration)
 
-	//println("-- server starting")
+	// println("-- server starting")
 	if s.events.Serving != nil {
 		var svr Server
 		svr.NumLoops = numLoops
@@ -107,6 +107,7 @@ func serve(events Events, listeners []*listener) error {
 		for i, ln := range listeners {
 			svr.Addrs[i] = ln.lnaddr
 		}
+		// 如果设置了Serving的话，调用Serving方法
 		action := s.events.Serving(svr)
 		switch action {
 		case None:
@@ -134,17 +135,19 @@ func serve(events Events, listeners []*listener) error {
 			}
 			l.poll.Close()
 		}
-		//println("-- server stopped")
+		// println("-- server stopped")
 	}()
 
 	// create loops locally and bind the listeners.
 	for i := 0; i < numLoops; i++ {
+
 		l := &loop{
 			idx:     i,
-			poll:    internal.OpenPoll(),
+			poll:    internal.OpenPoll(), // epoll_create()
 			packet:  make([]byte, 0xFFFF),
 			fdconns: make(map[int]*conn),
 		}
+		// 每个loop都管理所有的listeners
 		for _, ln := range listeners {
 			l.poll.AddRead(ln.fd)
 		}
@@ -172,6 +175,7 @@ func loopCloseConn(s *server, l *loop, c *conn, err error) error {
 	return nil
 }
 
+// delete
 func loopDetachConn(s *server, l *loop, c *conn, err error) error {
 	if s.events.Detached == nil {
 		return loopCloseConn(s, l, c, err)
@@ -191,9 +195,11 @@ func loopDetachConn(s *server, l *loop, c *conn, err error) error {
 	return nil
 }
 
+// fd为0
 func loopNote(s *server, l *loop, note interface{}) error {
 	var err error
 	switch v := note.(type) {
+	// 心跳延时
 	case time.Duration:
 		delay, action := s.events.Tick()
 		switch action {
@@ -216,7 +222,7 @@ func loopNote(s *server, l *loop, note interface{}) error {
 
 func loopRun(s *server, l *loop) {
 	defer func() {
-		//fmt.Println("-- loop stopped --", l.idx)
+		// fmt.Println("-- loop stopped --", l.idx)
 		s.signalShutdown()
 		s.wg.Done()
 	}()
@@ -225,22 +231,28 @@ func loopRun(s *server, l *loop) {
 		go loopTicker(s, l)
 	}
 
-	//fmt.Println("-- loop started --", l.idx)
+	// fmt.Println("-- loop started --", l.idx)
+	// 阻塞，调用epoll_ctl or kqueue的阻塞方法
 	l.poll.Wait(func(fd int, note interface{}) error {
 		if fd == 0 {
 			return loopNote(s, l, note)
 		}
+		// 拿到连接
 		c := l.fdconns[fd]
 		switch {
 		case c == nil:
+			// 不存在的话，代表是个新的连接，处理接收请求
 			return loopAccept(s, l, fd)
 		case !c.opened:
+			// c未打开，则打开
 			return loopOpened(s, l, c)
 		case len(c.out) > 0:
+			// 处理写请求
 			return loopWrite(s, l, c)
 		case c.action != None:
 			return loopAction(s, l, c)
 		default:
+			// 处理读请求
 			return loopRead(s, l, c)
 		}
 	})
@@ -255,13 +267,20 @@ func loopTicker(s *server, l *loop) {
 	}
 }
 
+// 接收连接
+// 1.构造一个连接
+// 2.放入到当前的loop中管理，涉及负载均衡，如何从n个loop中选择一个loop？
 func loopAccept(s *server, l *loop, fd int) error {
 	for i, ln := range s.lns {
+		// 来自这个监听的
 		if ln.fd == fd {
+			// 有多个loop时，需要复杂均衡
 			if len(s.loops) > 1 {
+				// 负载均衡
 				switch s.balance {
 				case LeastConnections:
 					n := atomic.LoadInt32(&l.count)
+					// n个loop中，找出最小连接的loop
 					for _, lp := range s.loops {
 						if lp.idx != l.idx {
 							if atomic.LoadInt32(&lp.count) < n {
@@ -270,6 +289,7 @@ func loopAccept(s *server, l *loop, fd int) error {
 						}
 					}
 				case RoundRobin:
+					// 轮训
 					idx := int(atomic.LoadUintptr(&s.accepted)) % len(s.loops)
 					if idx != l.idx {
 						return nil // do not accept
@@ -277,9 +297,11 @@ func loopAccept(s *server, l *loop, fd int) error {
 					atomic.AddUintptr(&s.accepted, 1)
 				}
 			}
+
 			if ln.pconn != nil {
 				return loopUDPRead(s, l, i, fd)
 			}
+			// 接收连接
 			nfd, sa, err := syscall.Accept(fd)
 			if err != nil {
 				if err == syscall.EAGAIN {
@@ -287,11 +309,14 @@ func loopAccept(s *server, l *loop, fd int) error {
 				}
 				return err
 			}
+			// 设置非阻塞
 			if err := syscall.SetNonblock(nfd, true); err != nil {
 				return err
 			}
+			// 构建连接
 			c := &conn{fd: nfd, sa: sa, lnidx: i, loop: l}
 			c.out = nil
+			// 给这个loop中加入
 			l.fdconns[c.fd] = c
 			l.poll.AddReadWrite(c.fd)
 			atomic.AddInt32(&l.count, 1)
@@ -367,6 +392,7 @@ func loopOpened(s *server, l *loop, c *conn) error {
 }
 
 func loopWrite(s *server, l *loop, c *conn) error {
+	// PreWrite()->Write()
 	if s.events.PreWrite != nil {
 		s.events.PreWrite()
 	}
@@ -377,7 +403,9 @@ func loopWrite(s *server, l *loop, c *conn) error {
 		}
 		return loopCloseConn(s, l, c, err)
 	}
+	// 全部写成功了
 	if n == len(c.out) {
+		// 超过页大小
 		// release the connection output page if it goes over page size,
 		// otherwise keep reusing existing page.
 		if cap(c.out) > 4096 {
@@ -386,9 +414,11 @@ func loopWrite(s *server, l *loop, c *conn) error {
 			c.out = c.out[:0]
 		}
 	} else {
+		// n以后的未写入，更新
 		c.out = c.out[n:]
 	}
 	if len(c.out) == 0 && c.action == None {
+		// 写数据完了的话，监听读事件
 		l.poll.ModRead(c.fd)
 	}
 	return nil
@@ -428,6 +458,7 @@ func loopWake(s *server, l *loop, c *conn) error {
 
 func loopRead(s *server, l *loop, c *conn) error {
 	var in []byte
+	// Read()->Data()->Write()
 	n, err := syscall.Read(c.fd, l.packet)
 	if n == 0 || err != nil {
 		if err == syscall.EAGAIN {
@@ -447,6 +478,7 @@ func loopRead(s *server, l *loop, c *conn) error {
 		}
 	}
 	if len(c.out) != 0 || c.action != None {
+		// 有数据写，所以监听写
 		l.poll.ModReadWrite(c.fd)
 	}
 	return nil
@@ -536,6 +568,7 @@ func reuseportListenPacket(proto, addr string) (l net.PacketConn, err error) {
 	return reuseport.ListenPacket(proto, addr)
 }
 
+// 调用reuseport库，syscall.SetsockoptInt reuseport
 func reuseportListen(proto, addr string) (l net.Listener, err error) {
 	return reuseport.Listen(proto, addr)
 }

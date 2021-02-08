@@ -41,6 +41,7 @@ func main() {
 		}
 		return
 	}
+	// 数据，in是读进来的，out是写出去的
 	events.Data = func(c evio.Conn, in []byte) (out []byte, action evio.Action) {
 		if trace {
 			log.Printf("%s", strings.TrimSpace(string(in)))
