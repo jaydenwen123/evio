@@ -147,7 +147,7 @@ func serve(events Events, listeners []*listener) error {
 			packet:  make([]byte, 0xFFFF),
 			fdconns: make(map[int]*conn),
 		}
-		// 每个loop都管理所有的listeners
+		// 每个loop都管理所有的listeners，会存在惊群效应，但也是利用这点来处理负载均衡
 		for _, ln := range listeners {
 			l.poll.AddRead(ln.fd)
 		}

@@ -182,6 +182,7 @@ func Serve(events Events, addr ...string) error {
 			ln.lnaddr = ln.ln.Addr()
 		}
 		if !stdlib {
+			// 设置非阻塞
 			if err := ln.system(); err != nil {
 				return err
 			}
