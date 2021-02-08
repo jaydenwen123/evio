@@ -274,7 +274,8 @@ func loopAccept(s *server, l *loop, fd int) error {
 	for i, ln := range s.lns {
 		// 来自这个监听的
 		if ln.fd == fd {
-			// 有多个loop时，需要复杂均衡
+			// 有多个loop时，需要负载均衡，此处的负载均衡是交给内核来实现，即一个fd会被多个epoll监听客户端连接，只要当前的被
+			// 触发的epoll不接受该请求，则本次会被跳过，继续触发其他的epoll。太巧妙了
 			if len(s.loops) > 1 {
 				// 负载均衡
 				switch s.balance {
@@ -284,14 +285,17 @@ func loopAccept(s *server, l *loop, fd int) error {
 					for _, lp := range s.loops {
 						if lp.idx != l.idx {
 							if atomic.LoadInt32(&lp.count) < n {
+								// 这儿不接收时，这次连接会跳过，等待事件在内核中触发另外的epoll
 								return nil // do not accept
 							}
 						}
 					}
 				case RoundRobin:
-					// 轮训
+					// 轮询
 					idx := int(atomic.LoadUintptr(&s.accepted)) % len(s.loops)
 					if idx != l.idx {
+						// 不接收的时候，事件会被再次触发另外的epoll。因此在一开始时，一个socket被多个epoll管理
+						// 这点和特别
 						return nil // do not accept
 					}
 					atomic.AddUintptr(&s.accepted, 1)
@@ -391,6 +395,7 @@ func loopOpened(s *server, l *loop, c *conn) error {
 	return nil
 }
 
+// 如果写数据写完了，则更新时间成监听读事件
 func loopWrite(s *server, l *loop, c *conn) error {
 	// PreWrite()->Write()
 	if s.events.PreWrite != nil {
@@ -456,6 +461,7 @@ func loopWake(s *server, l *loop, c *conn) error {
 	return nil
 }
 
+// 处理读事件，读到数据，然后处理完，将要写的数据写入到out中
 func loopRead(s *server, l *loop, c *conn) error {
 	var in []byte
 	// Read()->Data()->Write()
